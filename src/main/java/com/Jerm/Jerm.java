@@ -1,5 +1,6 @@
 package com.Jerm;
 
+import com.Jerm.service.ShellServiceImpl;
 import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.gui2.*;
 import com.googlecode.lanterna.screen.Screen;
@@ -7,7 +8,6 @@ import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
 import com.googlecode.lanterna.terminal.Terminal;
 import com.Jerm.model.CommandResult;
-import com.Jerm.service.FakeShellServiceImpl;
 import com.Jerm.service.ShellService;
 import java.io.IOException;
 import java.util.List;
@@ -15,7 +15,7 @@ import java.util.List;
 public class Jerm {
     public static void main(String[] args) {
         // Apps components
-        ShellService shellService = new FakeShellServiceImpl();
+        ShellService shellService = new ShellServiceImpl();
 
         try (Terminal terminal = new DefaultTerminalFactory().createTerminal()) {
             Screen screen = new TerminalScreen(terminal);
