@@ -1,5 +1,7 @@
 package com.Jerm;
 
+import com.Jerm.model.CommandResult;
+import com.Jerm.service.ShellService;
 import com.Jerm.service.ShellServiceImpl;
 import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.gui2.*;
@@ -7,13 +9,12 @@ import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
 import com.googlecode.lanterna.terminal.Terminal;
-import com.Jerm.model.CommandResult;
-import com.Jerm.service.ShellService;
+
 import java.io.IOException;
 import java.util.List;
 
 public class Jerm {
-    public static void main(String[] args) {
+    static void main(String[] args) {
         // Apps components
         ShellService shellService = new ShellServiceImpl();
 
@@ -37,8 +38,19 @@ public class Jerm {
 
                 // Delegate the work to service
                 CommandResult result = shellService.executeCommand(command);
-                // Update the up with the result
-                outputArea.setText(result.output());
+
+                // Sanitize the output before displaying it
+                // The regular expression "[^\\p{Print}\n\r]" matches any character that is NOT a printable character, a newline or a carriage return
+                String sanitizedOutput = result.output().replaceAll("[^\\p{Print}\n\r]", "");
+                String sanitizedError = result.error().replaceAll("[^\\p{Print}\n\r]", "");
+
+                // Check the exit code to decide what to display
+                if (result.exitCode() == 0) {
+                    outputArea.setText(sanitizedOutput);
+                } else {
+                    // If there was an error, show the error stream
+                    outputArea.setText("Error (Exit Code: " + result.exitCode() + "):\n" + sanitizedError);
+                }
                 commandInput.setText(""); // Clear the input box
             });
 
