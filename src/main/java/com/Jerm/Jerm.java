@@ -40,13 +40,15 @@ public class Jerm {
                 CommandResult result = shellService.executeCommand(command);
 
                 // Sanitize the output before displaying it
-                // The regular expression "[^\\p{Print}\n\r]" matches any character that is NOT a printable character, a newline or a carriage return
-                String sanitizedOutput = result.output().replaceAll("[^\\p{Print}\n\r]", "");
-                String sanitizedError = result.error().replaceAll("[^\\p{Print}\n\r]", "");
+                // This regex matches the entire ANSI escape code sequence and removes it
+                final String ansiRegex = "\\u001B\\[[;\\d]*[ -/]*[@-~]";
+                String sanitizedOutput = result.output().replaceAll(ansiRegex, "");
+                String sanitizedError = result.error().replaceAll(ansiRegex, "");
 
                 // Check the exit code to decide what to display
                 if (result.exitCode() == 0) {
-                    outputArea.setText(sanitizedOutput);
+                    // Trimming leading/trailing whitespace that can be left after sanitizing
+                    outputArea.setText(sanitizedOutput.trim());
                 } else {
                     // If there was an error, show the error stream
                     outputArea.setText("Error (Exit Code: " + result.exitCode() + "):\n" + sanitizedError);
