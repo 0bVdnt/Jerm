@@ -15,6 +15,19 @@
     </properties>
 
     <dependencies>
+
+        <!-- For creating true interactive Pseudo-Terminal (PTY) sessions -->
+        <dependency>
+            <groupId>com.github.jnr</groupId>
+            <artifactId>jnr-unixsocket</artifactId>
+            <version>0.38.22</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.pty4j</groupId>
+            <artifactId>pty4j</artifactId>
+            <version>0.13.11</version>
+        </dependency>
+
         <!-- Terminal GUI Library -->
         <dependency>
             <groupId>com.googlecode.lanterna</groupId>

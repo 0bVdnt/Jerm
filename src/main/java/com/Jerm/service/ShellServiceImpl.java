@@ -1,64 +1,126 @@
 package com.Jerm.service;
 
 import com.Jerm.model.CommandResult;
+import com.pty4j.PtyProcess;
+import com.pty4j.PtyProcessBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
-/**
- * The real implementation of ShellService that executes commands on the underlying OS
- * It will use the Linux bash shell for now
- */
 public class ShellServiceImpl implements ShellService {
-
-    // A logger instance for this class, industry-standard logging
     private static final Logger LOGGER = LoggerFactory.getLogger(ShellServiceImpl.class);
+
+    private static final String START_BOUNDARY = "START_BOUNDARY_" + UUID.randomUUID();
+    private static final String EXIT_CODE_BOUNDARY = "EXIT_CODE_BOUNDARY_" + UUID.randomUUID();
+    private static final String COMMAND_DONE_BOUNDARY = "COMMAND_DONE_BOUNDARY_" + UUID.randomUUID();
+
+    private final PtyProcess process;
+    private final BufferedReader reader;
+    private final BufferedWriter writer;
+
+    public ShellServiceImpl() {
+        try {
+            String[] cmd = {"/bin/bash", "-i"};
+            Map<String, String> env = new HashMap<>(System.getenv());
+            env.put("TERM", "dumb");
+            env.put("CLICOLOR_FORCE", "0");
+
+            this.process = new PtyProcessBuilder(cmd).setEnvironment(env).start();
+            this.reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+            this.writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+
+            consumeInitialOutput();
+            LOGGER.info("PTY Shell session started successfully.");
+        } catch (IOException e) {
+            LOGGER.error("Failed to start PTY shell session", e);
+            throw new RuntimeException("Failed to initialize shell session", e);
+        }
+    }
+
+    // This helper consumes the initial shell prompt and any welcome messages
+    private void consumeInitialOutput() throws IOException {
+        long startTime = System.currentTimeMillis();
+        // Wait for up to 2 seconds for the shell to be ready
+        while (System.currentTimeMillis() - startTime < 2000) {
+            if (reader.ready()) {
+                char[] buffer = new char[1024];
+                while(reader.ready() && reader.read(buffer) > 0) {
+                    // Do nothing, just consume the output
+                }
+            } else {
+                // Shell is quiet, assume it's ready
+                return;
+            }
+        }
+        LOGGER.warn("Shell was not quiet during startup; initialization may be slow.");
+    }
 
     @Override
     public CommandResult executeCommand(String command) {
-        // ProcessBuilder, the modern and preferred way to run external processes
-        // "bash -c" which tells the bash shell to execute the command string that follows
-        var processBuilder = new ProcessBuilder("bash", "-c", command);
-
+        if (!process.isAlive() || command.trim().equalsIgnoreCase("exit")) {
+            return new CommandResult(-1, "", "Shell process is not running.");
+        }
         try {
-            // Start the process. This is non-blocking
-            Process process = processBuilder.start();
-            LOGGER.info("Executing command: '{}'", command);
+            // The Three Boundary
+            String startCommand = "echo " + START_BOUNDARY;
+            String exitCodeCommand = "echo " + EXIT_CODE_BOUNDARY + "$?";
+            String doneCommand = "echo " + COMMAND_DONE_BOUNDARY;
 
-            // A virtual thread executor to handle I/O streams concurrently
-            // Highly efficient and prevents the process from hanging
-            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                // Read the standard output stream
-                var outputFuture = executor.submit(() ->
-                        new BufferedReader(new InputStreamReader(process.getInputStream()))
-                                .lines().collect(Collectors.joining("\n")));
+            String fullCommand = startCommand + "; " + command + "; " + exitCodeCommand + "; " + doneCommand + "\n";
+            writer.write(fullCommand);
+            writer.flush();
 
-                // Read the standard error stream
-                var errorFuture = executor.submit(() ->
-                        new BufferedReader(new InputStreamReader(process.getErrorStream()))
-                                .lines().collect(Collectors.joining("\n")));
+            // State machine for parsing the response
+            StringBuilder outputBuilder = new StringBuilder();
+            int exitCode = -1;
+            boolean captureStarted = false;
+            String line;
 
-                // Wait for the process to complete and get its exit code
-                int exitCode = process.waitFor();
-                LOGGER.info("Command finished with exit code: {}", exitCode);
+            while ((line = reader.readLine()) != null) {
+                // State 1: Waiting for the start boundary
+                if (!captureStarted) {
+                    if (line.contains(START_BOUNDARY)) {
+                        captureStarted = true;
+                    }
+                    continue; // Discard everything before the start boundary
+                }
 
-                // Get the results from concurrent tasks
-                String output = outputFuture.get();
-                String error = errorFuture.get();
+                // State 2: Capturing output
+                if (line.contains(COMMAND_DONE_BOUNDARY)) {
+                    break; // End of our controlled block
+                }
 
-                // Return the complete result
-                return new CommandResult(exitCode, output, error);
+                if (line.contains(EXIT_CODE_BOUNDARY)) {
+                    String exitCodeStr = line.substring(EXIT_CODE_BOUNDARY.length()).trim();
+                    try {
+                        exitCode = Integer.parseInt(exitCodeStr);
+                    } catch (NumberFormatException e) {
+                        LOGGER.error("Failed to parse exit code: {}", exitCodeStr, e);
+                    }
+                } else {
+                    // This is a real line of output from the user's command
+                    outputBuilder.append(line).append("\n");
+                }
             }
 
-        } catch (Exception e) {
-            // If anything goes wrong (e.g., command not found, interrupted), log it
-            LOGGER.error("Failed to execute command: {}", command, e);
-            // Return an error result
+            return new CommandResult(exitCode, outputBuilder.toString().trim(), "");
+
+        } catch (IOException e) {
+            LOGGER.error("Error executing command: {}", command, e);
             return new CommandResult(-1, "", e.getMessage());
+        }
+    }
+
+    @Override
+    public void close() {
+        if (process != null && process.isAlive()) {
+            process.destroy();
+            LOGGER.info("PTY Shell session closed.");
         }
     }
 }
